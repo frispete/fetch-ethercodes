@@ -5,11 +5,12 @@ Synopsis:
 Fetch current IEEE MA-L Assignments file (oui.csv) from IEEE.org,
 and generate ethercodes.dat for arpwatch consumption.
 
-Usage: {appname} [-hVvfT][-t sec][-O ouifile][-o outfile]
+Usage: {appname} [-hVvfkT][-t sec][-O ouifile][-o outfile]
        -h, --help           this message
        -V, --version        print version and exit
        -v, --verbose        verbose mode (cumulative)
        -f, --force          force operation
+       -k, --keep           keep existing {ouifile}
        -T, --timestamp      print timestamp
        -t, --deltat sec     tolerance in timestamp comparison
                             (default: {deltat} sec.)
@@ -21,7 +22,8 @@ Usage: {appname} [-hVvfT][-t sec][-O ouifile][-o outfile]
 Description:
 Fetch oui.csv only, if the timstamp is newer (unless --force is given).
 Similar, generate ethercodes.dat only, if the timestamp don't match
-(again, unless --force is given).
+(again, unless --force is given). Use option --keep to (re)generate
+ethercodes.dat from an existing oui.csv.
 
 Notes:
 The timestamps of oui.csv fluctuate in a 2 seconds range(!). Therefore
@@ -38,7 +40,7 @@ License:
 # vim:set et ts=8 sw=4:
 #
 
-__version__ = '0.1'
+__version__ = '0.2'
 __author__ = 'Hans-Peter Jansen <hpj@urpla.net>'
 __license__ = 'GNU GPL v2 - see http://www.gnu.org/licenses/gpl2.txt for details'
 
@@ -47,6 +49,7 @@ import os
 import csv
 import sys
 import time
+import codecs
 import getopt
 import traceback
 import email.utils
@@ -54,6 +57,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+# avoid encoding issues with print() in locale-less environments
+os.environ["PYTHONIOENCODING"] = "utf-8"
 
 class gpar:
     """ global parameter class """
@@ -66,6 +71,7 @@ class gpar:
     license = __license__
     loglevel = 0
     force = False
+    keep = False
     timestamp = False
     ouifile = 'http://standards-oui.ieee.org/oui/oui.csv'
     outfile = 'ethercodes.dat'
@@ -108,12 +114,11 @@ def code_key(val):
         return ':'.join((map(hexstr, map(hex, (val[:2], val[2:4], val[4:])))))
 
 
-def main():
-    ret = 0
-    vout(2, 'started with pid {pid} in {appdir}')
+def fetch_infile(infile):
+    # check oui.csv parameter
     vout(1, 'check {ouifile}')
     req = urllib.request.urlopen(gpar.ouifile)
-    vout(2, 'header info: {}'.format(req.info()))
+    vout(3, 'header info: {}'.format(req.info()))
     header = req.info()
     ouisize = int(header['Content-Length'])
     vout(1, 'oui file size: {}'.format(ouisize))
@@ -124,18 +129,15 @@ def main():
     vout(3, 'parsed oui file date: {} ({})'.format(
             time.asctime(ouidate), ouitime))
 
-    # extract file argument of URL (used to be 'oui.csv')
-    infile = os.path.basename(urllib.parse.urlparse(req.geturl()).path)
-    gpar.infile = infile
     # check, if local oui.csv is outdated
     fetchoui = False
     if gpar.force:
         fetchoui = True
     elif not os.path.exists(infile):
-        vout(1, 'no local file {} found'.format(infile))
+        vout(1, 'no local file {infile} found')
         fetchoui = True
     elif os.path.getsize(infile) != ouisize:
-        vout(1, 'local file size differ: {} vs. {} remote'.format(
+        vout(1, 'local file size differs: {} vs. {} remote'.format(
                 os.path.getsize(infile), ouisize))
         fetchoui = True
     elif not cmp_ts(os.stat(infile).st_mtime, ouitime):
@@ -143,7 +145,7 @@ def main():
         vout(3, str(ouitime))
         mtime = time.localtime(os.stat(infile).st_mtime)
         otime = time.localtime(ouitime)
-        vout(1, 'local file date differ: {} vs. {} remote'.format(
+        vout(1, 'local file date differs: {} vs. {} remote'.format(
                 time.asctime(mtime), time.asctime(otime)))
         fetchoui = True
     # fetch oui.csv
@@ -152,8 +154,47 @@ def main():
         open(infile, 'wb').write(req.read())
         os.utime(infile, (ouitime, ouitime))
 
-    # check, if ethercodes.dat is outdated
+    return ouidate
+
+
+def parse_csv(infile):
+    vout(1, 'parse {infile}')
+    codes = {}
+    with codecs.open(infile, encoding = 'utf-8') as f:
+        reader = csv.reader(f)
+        for row in reader:
+            vout(3, str(row))
+            # generate
+            code = code_key(row[1])
+            if code:
+                if code in codes and codes[code] != row[2]:
+                    vout(1, 'value {} exists already: "{}", "{}"'.format(
+                            code, codes[code], row[2]))
+                else:
+                    codes[code] = row[2]
+    return codes
+
+
+def main():
+    ret = 0
+    # extract file argument from URL
+    gpar.infile = os.path.basename(urllib.parse.urlparse(gpar.ouifile).path)
+    # default: oui.csv
+    infile = gpar.infile
+    # default: ethercodes.dat
     outfile = gpar.outfile
+    if gpar.keep:
+        if os.path.exists(infile):
+            # force generation of ethercodes.dat from existing oui.csv
+            gpar.force = True
+            ouidate = time.localtime(os.stat(infile).st_mtime)
+        else:
+            exit(1, 'keep option selected, but no {infile}')
+    else:
+        ouidate = fetch_infile(infile)
+    ouitime = time.mktime(ouidate)
+
+    # check, if ethercodes.dat is outdated
     gencodes = False
     if gpar.force:
         gencodes = True
@@ -165,49 +206,34 @@ def main():
         vout(3, str(ouitime))
         mtime = time.localtime(os.stat(outfile).st_mtime)
         otime = time.localtime(ouitime)
-        vout(2, 'local file date differ: {} vs. {} remote'.format(
+        vout(2, 'local file date differs: {} vs. {} remote'.format(
                 time.asctime(mtime), time.asctime(otime)))
         gencodes = True
 
     # generate ethercodes.dat
     if gencodes:
-        vout(1, 'parse {infile}')
-        codes = {}
-        with open(infile, newline = '') as f:
-            reader = csv.reader(f)
-            rows = 0
-            for row in reader:
-                vout(3, str(row))
-                # generate
-                code = code_key(row[1])
-                if code:
-                    if code in codes and codes[code] != row[2]:
-                        vout(1, 'value {} exists already: "{}", "{}"'.format(
-                                code, codes[code], row[2]))
-                    else:
-                        codes[code] = row[2]
-                rows += 1
-
-        vout(1, 'generate {} with {} entries'.format(outfile, len(codes)))
-        with open(outfile, 'w') as f:
+        codes = parse_csv(infile)
+        gpar.nrcodes = len(codes)
+        vout(1, 'generate {outfile} with {nrcodes} entries')
+        with codecs.open(outfile, 'w', 'utf-8') as f:
             for key in sorted(codes.keys()):
                 f.write('%s\t%s\n' % (key, codes[key]))
         os.utime(outfile, (ouitime, ouitime))
         vout(1, 'successful')
     else:
-        vout(1, 'code file {} up to date already'.format(outfile))
+        vout(1, 'code file {outfile} up to date already')
 
     if gpar.timestamp:
-        vout(0, time.strftime('%Y%m%d-%H%M%S', ouidate))
+        vout(0, time.strftime('timestamp: %Y%m%d_%H%M%S', ouidate))
 
     return ret
 
 
 if __name__ == '__main__':
     try:
-        optlist, args = getopt.getopt(sys.argv[1:], 'hVvfTt:O:o:',
-            ('help', 'version', 'verbose', 'force', 'timestamp',
-             'deltat', 'ouifile', 'outfile')
+        optlist, args = getopt.getopt(sys.argv[1:], 'hVvfkTt:O:o:',
+            ('help', 'version', 'verbose', 'force', 'keep',
+             'timestamp', 'deltat', 'ouifile', 'outfile')
         )
     except getopt.error as msg:
         exit(1, msg, True)
@@ -221,6 +247,8 @@ if __name__ == '__main__':
             gpar.loglevel += 1
         elif opt in ('-f', '--force'):
             gpar.force = True
+        elif opt in ('-k', '--keep'):
+            gpar.keep = True
         elif opt in ('-T', '--timestamp'):
             gpar.timestamp = True
         elif opt in ('-t', '--deltat'):
