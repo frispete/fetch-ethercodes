@@ -1,29 +1,34 @@
 #! /usr/bin/env python3
 """
 Synopsis:
+Fetch and generate ethercodes data for arpwatch
 
-Fetch current IEEE MA-L Assignments file (oui.csv) from IEEE.org,
-and generate ethercodes.dat for arpwatch consumption.
-
-Usage: {appname} [-hVvfkT][-t sec][-O ouifile][-o outfile]
+Usage: {appname} [-hVvfkt][-T sec][-O ouifile][-o outfile][-p spec]
        -h, --help           this message
        -V, --version        print version and exit
        -v, --verbose        verbose mode (cumulative)
        -f, --force          force operation
        -k, --keep           keep existing {ouifile}
-       -T, --timestamp      print timestamp
-       -t, --deltat sec     tolerance in timestamp comparison
+       -t, --timestamp      print timestamp
+       -T, --deltat sec     tolerance in timestamp comparison
                             (default: {deltat} sec.)
        -O, --ouifile file   IEEE.org host
                             (default: {ouifile})
        -o, --outfile file   arpwatch ethercodes
                             (default: {outfile})
+       -p, --patch spec     patch specfile with updated timestamp
 
 Description:
-Fetch oui.csv only, if the timstamp is newer (unless --force is given).
-Similar, generate ethercodes.dat only, if the timestamp don't match
+Fetch current IEEE MA-L Assignments file (oui.csv) from IEEE.org,
+and generate ethercodes.dat for arpwatch consumption.
+
+Fetch oui.csv only, if the timestamp is newer (unless --force is given).
+Similar, generate ethercodes.dat only, if the timestamps don't match
 (again, unless --force is given). Use option --keep to (re)generate
 ethercodes.dat from an existing oui.csv.
+
+Patch replaces a pattern NNNNNNNN_NNNNNN with the current timestamp
+in the given file.
 
 Notes:
 The timestamps of oui.csv fluctuate in a 2 seconds range(!). Therefore
@@ -31,7 +36,7 @@ compensate the fluctuation by taking a deltat tolerance factor into
 account.
 
 Copyright:
-(c)2016 by {author}
+(c)2018 by {author} {email}
 
 License:
 {license}
@@ -40,16 +45,17 @@ License:
 # vim:set et ts=8 sw=4:
 #
 
-__version__ = '0.2'
-__author__ = 'Hans-Peter Jansen <hpj@urpla.net>'
-__license__ = 'GNU GPL v2 - see http://www.gnu.org/licenses/gpl2.txt for details'
+__version__ = '0.3'
+__author__ = 'Hans-Peter Jansen'
+__email__ = '<hpj@urpla.net>'
+__license__ = 'MIT'
 
 
 import os
+import re
 import csv
 import sys
 import time
-import codecs
 import getopt
 import traceback
 import email.utils
@@ -68,14 +74,16 @@ class gpar:
     pid = os.getpid()
     version = __version__
     author = __author__
+    email = __email__
     license = __license__
     loglevel = 0
     force = False
     keep = False
     timestamp = False
+    deltat = 2.5
     ouifile = 'http://standards-oui.ieee.org/oui/oui.csv'
     outfile = 'ethercodes.dat'
-    deltat = 2.5
+    patchfile = None
 
 
 def vout(lvl, msg):
@@ -160,7 +168,7 @@ def fetch_infile(infile):
 def parse_csv(infile):
     vout(1, 'parse {infile}')
     codes = {}
-    with codecs.open(infile, encoding = 'utf-8') as f:
+    with open(infile, newline = '', encoding = 'utf-8') as f:
         reader = csv.reader(f)
         for row in reader:
             vout(3, str(row))
@@ -175,8 +183,20 @@ def parse_csv(infile):
     return codes
 
 
-def main():
-    ret = 0
+def patch_file(patchfile, timestamp):
+    vout(1, 'patch {}'.format(patchfile))
+    with open(patchfile, 'r+', encoding = 'utf-8') as f:
+        content = f.read()
+        patched, count = re.subn('\d{8}_\d{6}', timestamp, content)
+        if count and content != patched:
+            f.seek(0)
+            f.write(patched)
+            vout(1, '{} occurances replaced in {}'.format(count, patchfile))
+        else:
+            vout(1, '{} unchanged'.format(patchfile))
+
+
+def fetch_ethercodes():
     # extract file argument from URL
     gpar.infile = os.path.basename(urllib.parse.urlparse(gpar.ouifile).path)
     # default: oui.csv
@@ -215,7 +235,7 @@ def main():
         codes = parse_csv(infile)
         gpar.nrcodes = len(codes)
         vout(1, 'generate {outfile} with {nrcodes} entries')
-        with codecs.open(outfile, 'w', 'utf-8') as f:
+        with open(outfile, 'w', newline = '', encoding = 'utf-8') as f:
             for key in sorted(codes.keys()):
                 f.write('%s\t%s\n' % (key, codes[key]))
         os.utime(outfile, (ouitime, ouitime))
@@ -223,17 +243,25 @@ def main():
     else:
         vout(1, 'code file {outfile} up to date already')
 
+    timestamp = time.strftime('%Y%m%d_%H%M%S', ouidate)
     if gpar.timestamp:
-        vout(0, time.strftime('timestamp: %Y%m%d_%H%M%S', ouidate))
+        vout(0, 'timestamp: {}'.format(timestamp))
 
-    return ret
+    if gpar.patchfile is not None:
+        patch_file(gpar.patchfile, timestamp)
+
+    return 0
 
 
-if __name__ == '__main__':
+def main(argv = None):
+    if argv is None:
+        argv = sys.argv[1:]
+
+    # yeah, oldschool, I know...
     try:
-        optlist, args = getopt.getopt(sys.argv[1:], 'hVvfkTt:O:o:',
-            ('help', 'version', 'verbose', 'force', 'keep',
-             'timestamp', 'deltat', 'ouifile', 'outfile')
+        optlist, args = getopt.getopt(argv, 'hVvfktT:O:o:p:',
+            ('help', 'version', 'verbose', 'force', 'keep', 'timestamp',
+             'deltat', 'ouifile', 'outfile', 'patch')
         )
     except getopt.error as msg:
         exit(1, msg, True)
@@ -249,16 +277,22 @@ if __name__ == '__main__':
             gpar.force = True
         elif opt in ('-k', '--keep'):
             gpar.keep = True
-        elif opt in ('-T', '--timestamp'):
+        elif opt in ('-t', '--timestamp'):
             gpar.timestamp = True
-        elif opt in ('-t', '--deltat'):
+        elif opt in ('-T', '--deltat'):
             gpar.deltat = par
         elif opt in ('-O', '--ouifile'):
             gpar.ouifile = par
         elif opt in ('-o', '--outfile'):
             gpar.outfile = par
+        elif opt in ('-p', '--patch'):
+            gpar.patchfile = par
 
     try:
-        sys.exit(main())
+        fetch_ethercodes()
     except Exception:
         exit(2, 'unexpected exception occured:\n%s' % traceback.format_exc())
+
+
+if __name__ == '__main__':
+    sys.exit(main())
