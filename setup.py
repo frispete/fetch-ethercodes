@@ -2,6 +2,7 @@
 # vim:set et ts=8 sw=4:
 
 import setuptools
+import fetch_ethercodes
 
 with open('README.md', encoding='utf-8') as readme:
     long_description = readme.read()
@@ -9,18 +10,19 @@ with open('README.md', encoding='utf-8') as readme:
 
 
 name = 'fetch-ethercodes'
-description = ''
+description = 'Fetch and generate ethercodes data for arpwatch'
 
 setup_params = dict(
     name = name,
-    version = '0.2',
-    author = 'Hans-Peter Jansen',
-    author_email = 'hpj@urpla.net',
+    version = fetch_ethercodes.__version__,
+    author = fetch_ethercodes.__author__,
+    author_email = fetch_ethercodes.__email__,
     description = description or name,
     long_description = long_description,
     long_description_content_type = long_description_content_type,
     url = 'https://github.com/frispete/' + name,
-    license = 'MIT',
+    license = fetch_ethercodes.__license__,
+    # entry points don't like python modules containing dashes :-(
     py_modules = ['fetch_ethercodes'],
     python_requires = '>=3',
     classifiers = [
