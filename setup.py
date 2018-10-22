@@ -37,6 +37,7 @@ setup_params = dict(
     entry_points = {
         'console_scripts': [
             'fetch-ethercodes = fetch_ethercodes:main',
+            'query-ethercodes = query_ethercodes:main',
         ],
     },
 )
