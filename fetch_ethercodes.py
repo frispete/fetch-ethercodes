@@ -45,7 +45,7 @@ License:
 # vim:set et ts=8 sw=4:
 #
 
-__version__ = '0.3'
+__version__ = '0.4'
 __author__ = 'Hans-Peter Jansen'
 __email__ = '<hpj@urpla.net>'
 __license__ = 'MIT'
@@ -172,14 +172,16 @@ def parse_csv(infile):
         reader = csv.reader(f)
         for row in reader:
             vout(3, str(row))
-            # generate
-            code = code_key(row[1])
-            if code:
-                if code in codes and codes[code] != row[2]:
+            # use ethercode and manufacturer name
+            code, value = row[1:3]
+            key = code_key(code)
+            value = value.strip()
+            if key:
+                if code in codes and codes[key] != value:
                     vout(1, 'value {} exists already: "{}", "{}"'.format(
-                            code, codes[code], row[2]))
+                            code, codes[key], value))
                 else:
-                    codes[code] = row[2]
+                    codes[key] = value
     return codes
 
 
@@ -291,7 +293,7 @@ def main(argv = None):
     try:
         fetch_ethercodes()
     except Exception:
-        exit(2, 'unexpected exception occured:\n%s' % traceback.format_exc())
+        exit(2, 'unexpected exception occurred:\n%s' % traceback.format_exc())
 
 
 if __name__ == '__main__':
