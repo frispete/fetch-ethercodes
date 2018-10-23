@@ -43,6 +43,7 @@ Example run
 -----------
 
 ```
+$ fetch-ethercodes.py -v
 check http://standards-oui.ieee.org/oui/oui.csv
 oui file size: 2264884
 oui file date: Wed, 26 Sep 2018 08:06:13 GMT
@@ -58,3 +59,5 @@ successful
 timestamp: 20180926_080613
 ```
 
+An additional tool `query-ethercodes.py` is provided, that allows to query the 
+ethercodes.dat database.
