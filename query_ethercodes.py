@@ -8,13 +8,16 @@ Usage: {appname} [-hVv] [-e file] ethercode..
        -V, --version        print version and exit
        -v, --verbose        verbose mode (cumulative)
        -e, --ec file        use file as ethercode source
+                            [default: {ecfile}]
 
-ethercode: at least 3 colon separated, hexadecimal bytes of an ethernet
-           address, e.g.: 90:e6:ba, 00:1B:21, ...
+ethercode: at least 3 hexadecimal bytes of an ethernet address,
+        e.g.: 90:e6:ba, 00-1B-21, bytes must be separated with
+        some non alpha numeric characters.
+
+If no manufacturer was found, UNKNOWN is returned.
 
 Notes: {appname} tries to read {ecfile} from these locations:
-       {locations}
-
+       {locations}.
 
 Copyright:
 (c)2018 by {author} {email}
@@ -33,6 +36,7 @@ __license__ = 'MIT'
 
 
 import os
+import re
 import sys
 import time
 import getopt
@@ -52,17 +56,15 @@ class gpar:
     email = __email__
     license = __license__
     loglevel = 0
-    force = False
-    keep = False
-    timestamp = False
-    deltat = 2.5
     ecfile = 'ethercodes.dat'
     locations = ['.', appdir, '/usr/share/arpwatch']
 
 
-def vout(lvl, msg, file = sys.stdout):
+def vout(lvl, msg):
     if lvl <= gpar.loglevel:
-        print((msg).format(**gpar.__dict__), file = file, flush = True)
+        print((msg).format(**gpar.__dict__), file = sys.stdout, flush = True)
+        return True
+    return False
 
 stderr = lambda *msg: print(*msg, file = sys.stderr, flush = True)
 
@@ -74,30 +76,26 @@ def exit(ret = 0, msg = None, usage = False):
         stderr(__doc__.format(**gpar.__dict__))
     sys.exit(ret)
 
-
 hex = lambda x: int(x, 16)
-hexstr = lambda h: format(h, 'x')
-
-def code_key(val):
-    """ return the colon formated code key, if val is an exact 24 byte
-        hexadecimal string, and None otherwise
-        000000 -> 0:0:0
-        ABCDEF -> ab:cd:ef
-    """
-    if len(val) == 6:
-        return ':'.join((map(hexstr, map(hex, (val[:2], val[2:4], val[4:])))))
-
 
 def decode_key(val):
-    """ return the ethercode from a colon formatted hexadecimal str,
+    """ return the ethercode from a hexadecimal str
+        accept any separator, that is not alpha numeric
         ab:cd:ef -> 11259375 (0xabcdef)
     """
-    v1, v2, v3 = val.split(':')[:3]
-    return (hex(v1) << 16) + (hex(v2) << 8) + hex(v3)
+    # extract our separators
+    sep = ''.join(set((c for c in val if not c.isalnum())))
+    # split val by separators, and convert hex value
+    ec = tuple(map(hex, re.split('[' + re.escape(sep) + ']', val)[:3]))
+    # sanity check
+    if max(ec) > 255:
+        raise ValueError('hex values must be 0 <= val <= 255: %s' % str(ec))
+
+    return (ec[0] << 16) + (ec[1] << 8) + ec[2]
 
 
 def load_ecfile(ecfile):
-    vout(1, 'load {ecfile}')
+    vout(2, 'load {ecfile}')
     start = time.time()
     codes = {}
     ln = 0
@@ -105,17 +103,17 @@ def load_ecfile(ecfile):
         for l in f:
             ln += 1
             try:
-                code, manufacturer = l.rstrip().split('\t')
-            except ValueError as e:
+                ec, manufacturer = l.rstrip().split('\t')
+            except ValueError:
                 stderr('invalid format in line #{}: {}'.format(ln, l))
             else:
-                ec = decode_key(code)
-                vout(3, '{}: {}: {}'.format(ec, code, manufacturer))
+                key = decode_key(ec)
+                vout(3, '{}: {}: {}'.format(key, ec, manufacturer))
                 if ec in codes:
-                    vout(2, '{} exists already: {}'.format(ec, codes[ec]))
-                codes[ec] = manufacturer
+                    vout(2, '{} exists already: {}'.format(ec, codes[key]))
+                codes[key] = manufacturer
 
-    vout(1, '{} codes loaded in {:.2f} sec.'.format(len(codes), time.time() - start))
+    vout(2, '{} codes loaded in {:.3f} sec.'.format(len(codes), time.time() - start))
     return codes
 
 
@@ -129,12 +127,11 @@ def query_ethercodes(args):
     else:
         for loc in gpar.locations:
             ecpath = os.path.join(loc, ecfile)
-            vout(2, 'locate {}'.format(ecpath))
             if os.path.exists(ecpath):
                 codes = load_ecfile(ecpath)
                 break
     if not codes:
-        exit(2, 'failed to load any valid {ecfile} file from {locations}')
+        exit(2, 'failed to load a valid {ecfile} file from {locations}')
 
     for arg in args:
         try:
@@ -142,7 +139,9 @@ def query_ethercodes(args):
         except ValueError as e:
             stderr('invalid ethernet code: {}: {}'.format(arg, e))
         else:
-            vout(0, '{}: {}'.format(arg, codes.get(ec, 'UNKNOWN')))
+            manufacturer = codes.get(ec, 'UNKNOWN')
+            if not vout(1, '{}: {}'.format(arg, manufacturer)):
+                vout(0, manufacturer)
 
     return 0
 
@@ -167,12 +166,12 @@ def main(argv = None):
         elif opt in ('-v', '--verbose'):
             gpar.loglevel += 1
         elif opt in ('-e', '--ecfile'):
-            gpar.ecfile = ecfile
+            gpar.ecfile = par
 
     try:
         query_ethercodes(args)
     except Exception:
-        exit(2, 'unexpected exception occured:\n%s' % traceback.format_exc())
+        exit(2, 'unexpected exception occurred:\n%s' % traceback.format_exc())
 
 
 if __name__ == '__main__':
