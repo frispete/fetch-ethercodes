@@ -4,6 +4,7 @@ dist/
 *.egg-info/
 ethercodes.dat
 oui.csv
+.eric6project
 *.e4p
 .*.sw?
 *~
