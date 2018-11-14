@@ -85,9 +85,13 @@ def decode_key(val):
     """
     # extract our separators
     sep = ''.join(set((c for c in val if not c.isalnum())))
+    if not sep:
+        raise ValueError('missing separator in ethercode')
     # split val by separators, and convert hex value
     ec = tuple(map(hex, re.split('[' + re.escape(sep) + ']', val)[:3]))
-    # sanity check
+    # sanity checks
+    if len(ec) < 3:
+        raise ValueError('must provide 3 byte values at least: %s given' % len(ec))
     if max(ec) > 255:
         raise ValueError('hex values must be 0 <= val <= 255: %s' % str(ec))
 
