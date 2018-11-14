@@ -45,7 +45,7 @@ License:
 # vim:set et ts=8 sw=4:
 #
 
-__version__ = '0.4'
+__version__ = '0.5'
 __author__ = 'Hans-Peter Jansen'
 __email__ = '<hpj@urpla.net>'
 __license__ = 'MIT'
